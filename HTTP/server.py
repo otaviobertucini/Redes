@@ -17,13 +17,22 @@ class MyServer(BaseHTTPRequestHandler):
 
         print('THREAD: ' + threading.currentThread().getName())
 
-        time.sleep(4)
+        # time.sleep(4)
+        if('image.jpg' in self.path):
+
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+
+            f = open("image.jpg", "rb")
+            self.wfile.write(f.read())
+
+            return None
 
         self.send_response(200)
         self.send_header("Content-Type", "text/html")
         self.send_header('Access-Control-Allow-Origin', '*')
-        # self.send_header('Server', self.version_string())
-        # self.send_header('Date', self.date_time_string())
         self.end_headers()
 
         content = ''
@@ -31,7 +40,7 @@ class MyServer(BaseHTTPRequestHandler):
         if('index.html' in self.path):
             filename = 'index.html'
         with open(filename) as file:
-            content = file.readlines()[0]
+            content = ''.join(file.readlines())
 
         self.wfile.write(bytes(str(content), "utf8"))
 
