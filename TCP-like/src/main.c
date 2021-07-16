@@ -1,129 +1,5 @@
 #include <stdio.h>
 
-/* ******************************************************************
- ALTERNATING BIT AND GO-BACK-N NETWORK EMULATOR: VERSION 1.1  J.F.Kurose
-
-   This code should be used for PA2, unidirectional or bidirectional
-   data transfer protocols (from A to B. Bidirectional transfer of data
-   is for extra credit and is not required).  Network properties:
-   - one way network delay averages five time units (longer if there
-     are other messages in the channel for GBN), but can be larger
-   - packets can be corrupted (either the header or the data portion)
-     or lost, according to user-defined probabilities
-   - packets will be delivered in the order in which they were sent
-     (although some can be lost).
-**********************************************************************/
-
-#define BIDIRECTIONAL 0 /* change to 1 if you're doing extra credit */
-                        /* and write a routine called B_output */
-
-/* a "msg" is the data unit passed from layer 5 (teachers code) to layer  */
-/* 4 (students' code).  It contains the data (characters) to be delivered */
-/* to layer 5 via the students transport level protocol entities.         */
-struct msg
-{
-    char data[20];
-};
-
-/* a packet is the data unit passed from layer 4 (students code) to layer */
-/* 3 (teachers code).  Note the pre-defined packet structure, which all   */
-/* students must follow. */
-struct pkt
-{
-    int seqnum;
-    int acknum;
-    int checksum;
-    char payload[20];
-};
-
-int in_transit = 0;
-struct pkt lastSent;
-
-int waitingA;
-int waitingB;
-
-/********* STUDENTS WRITE THE NEXT SEVEN ROUTINES *********/
-
-/* called from layer 5, passed the data to be sent to other side */
-A_output(message) struct msg message;
-{
-
-    if (in_transit)
-        return;
-
-    printf("Received from 5A\n");
-
-    struct pkt new_packet;
-    strcpy(message.data, new_packet.payload);
-    new_packet.acknum = waitingA;
-    new_packet.checksum = 0;
-    new_packet.seqnum = 0;
-
-    in_transit = 1;
-    lastSent = new_packet;
-    tolayer3(0, new_packet);
-}
-
-B_output(message) /* need be completed only for extra credit */
-    struct msg message;
-{
-}
-
-/* called from layer 3, when a packet arrives for layer 4 */
-A_input(packet) struct pkt packet;
-{
-    printf("Received from 3B\n");
-
-    if (packet.acknum == waitingA)
-    {
-        in_transit = 0;
-        waitingA = !waitingA;
-    }
-}
-
-/* called when A's timer goes off */
-A_timerinterrupt()
-{
-}
-
-/* the following routine will be called once (only) before any other */
-/* entity A routines are called. You can use it to do any initialization */
-A_init()
-{
-    waitingA = 0;
-}
-
-/* Note that with simplex transfer from a-to-B, there is no B_output() */
-
-/* called from layer 3, when a packet arrives for layer 4 at B*/
-B_input(packet) struct pkt packet;
-{
-    printf("Received from 3A\n");
-
-    if (packet.acknum == waitingB)
-    {
-
-        struct pkt ack;
-        ack.acknum = waitingB;
-
-        tolayer3(1, ack);
-
-        waitingB = !waitingB;
-    }
-}
-
-/* called when B's timer goes off */
-B_timerinterrupt()
-{
-}
-
-/* the following rouytine will be called once (only) before any other */
-/* entity B routines are called. You can use it to do any initialization */
-B_init()
-{
-    waitingB = 0;
-}
-
 /*****************************************************************
 ***************** NETWORK EMULATION CODE STARTS BELOW ***********
 The code below emulates the layer 3 and below network environment:
@@ -171,6 +47,147 @@ float lambda;      /* arrival rate of messages from layer 5 */
 int ntolayer3;     /* number sent into layer 3 */
 int nlost;         /* number lost in media */
 int ncorrupt;      /* number corrupted by media*/
+
+/* ******************************************************************
+ ALTERNATING BIT AND GO-BACK-N NETWORK EMULATOR: VERSION 1.1  J.F.Kurose
+
+   This code should be used for PA2, unidirectional or bidirectional
+   data transfer protocols (from A to B. Bidirectional transfer of data
+   is for extra credit and is not required).  Network properties:
+   - one way network delay averages five time units (longer if there
+     are other messages in the channel for GBN), but can be larger
+   - packets can be corrupted (either the header or the data portion)
+     or lost, according to user-defined probabilities
+   - packets will be delivered in the order in which they were sent
+     (although some can be lost).
+**********************************************************************/
+
+#define BIDIRECTIONAL 0 /* change to 1 if you're doing extra credit */
+                        /* and write a routine called B_output */
+
+/* a "msg" is the data unit passed from layer 5 (teachers code) to layer  */
+/* 4 (students' code).  It contains the data (characters) to be delivered */
+/* to layer 5 via the students transport level protocol entities.         */
+struct msg
+{
+    char data[20];
+};
+
+/* a packet is the data unit passed from layer 4 (students code) to layer */
+/* 3 (teachers code).  Note the pre-defined packet structure, which all   */
+/* students must follow. */
+struct pkt
+{
+    int seqnum;
+    int acknum;
+    int checksum;
+    char payload[20];
+};
+
+int in_transit = 0;
+struct msg lastSent;
+
+int waitingA;
+int waitingB;
+
+/********* STUDENTS WRITE THE NEXT SEVEN ROUTINES *********/
+
+A_send(message) struct msg message;
+{
+
+    struct pkt new_packet;
+    strcpy(message.data, new_packet.payload);
+    new_packet.acknum = waitingA;
+    new_packet.checksum = 0;
+    new_packet.seqnum = 0;
+
+    in_transit = 1;
+    lastSent = message;
+
+    starttimer(A, 5.0);
+    tolayer3(A, new_packet);
+}
+
+/* called from layer 5, passed the data to be sent to other side */
+A_output(message) struct msg message;
+{
+
+    if (in_transit)
+        return;
+
+    printf("Received from 5A %d\n", waitingA);
+    A_send(message);
+}
+
+B_output(message) /* need be completed only for extra credit */
+    struct msg message;
+{
+}
+
+/* called from layer 3, when a packet arrives for layer 4 */
+A_input(packet) struct pkt packet;
+{
+    printf("Received from 3B %d\n", packet.acknum);
+
+    if (packet.acknum == waitingA)
+    {
+        in_transit = 0;
+        waitingA = !waitingA;
+        stoptimer(A);
+    }
+}
+
+/* called when A's timer goes off */
+A_timerinterrupt()
+{
+    printf("man, i was interrupted\n");
+    A_send(lastSent);
+}
+
+/* the following routine will be called once (only) before any other */
+/* entity A routines are called. You can use it to do any initialization */
+A_init()
+{
+    waitingA = 0;
+}
+
+/* Note that with simplex transfer from a-to-B, there is no B_output() */
+
+/* called from layer 3, when a packet arrives for layer 4 at B*/
+B_input(packet) struct pkt packet;
+{
+    printf("Received from 3A %d wt: %d\n", packet.acknum, waitingB);
+
+    if (packet.acknum == waitingB)
+    {
+
+        struct pkt ack;
+        ack.acknum = waitingB;
+
+        tolayer3(B, ack);
+
+        waitingB = !waitingB;
+
+        return;
+    }
+
+    struct pkt ack;
+    ack.acknum = !waitingB;
+
+    tolayer3(B, ack);
+}
+
+/* called when B's timer goes off */
+B_timerinterrupt()
+{
+}
+
+/* the following rouytine will be called once (only) before any other */
+/* entity B routines are called. You can use it to do any initialization */
+B_init()
+{
+    waitingB = 0;
+}
 
 main()
 {
@@ -267,10 +284,10 @@ init() /* initialize the simulator */
 
     // Defaults
     nsimmax = 10;
-    lossprob = 0;
+    lossprob = 0.1;
     corruptprob = 0;
     lambda = 1000;
-    TRACE = 2;
+    TRACE = 0;
 
     // printf("-----  Stop and Wait Network Simulator Version 1.1 -------- \n\n");
     // printf("Enter the number of messages to simulate: ");
