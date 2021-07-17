@@ -90,21 +90,37 @@ struct msg lastSent;
 int waitingA;
 int waitingB;
 
+int seqnumA;
+
 /********* STUDENTS WRITE THE NEXT SEVEN ROUTINES *********/
+
+int calc_checksum(packet, a) struct pkt packet;
+{
+
+    int checksum = packet.acknum + packet.seqnum;
+    for (int i = 0; i < 20; i++)
+    {
+        int letter = packet.payload[i];
+        checksum += letter;
+    }
+
+    return checksum;
+}
 
 A_send(message) struct msg message;
 {
 
     struct pkt new_packet;
-    strcpy(message.data, new_packet.payload);
+    memmove(message.data, new_packet.payload, 20);
     new_packet.acknum = waitingA;
-    new_packet.checksum = 0;
-    new_packet.seqnum = 0;
+    new_packet.seqnum = seqnumA;
+    int checksum = calc_checksum(new_packet, waitingA, 0);
+    new_packet.checksum = checksum;
 
     in_transit = 1;
     lastSent = message;
 
-    starttimer(A, 5.0);
+    starttimer(A, 15.0);
     tolayer3(A, new_packet);
 }
 
@@ -127,10 +143,10 @@ B_output(message) /* need be completed only for extra credit */
 /* called from layer 3, when a packet arrives for layer 4 */
 A_input(packet) struct pkt packet;
 {
-    printf("Received from 3B %d\n", packet.acknum);
 
     if (packet.acknum == waitingA)
     {
+        printf("Received from 3B %d\n", packet.acknum);
         in_transit = 0;
         waitingA = !waitingA;
         stoptimer(A);
@@ -140,7 +156,7 @@ A_input(packet) struct pkt packet;
 /* called when A's timer goes off */
 A_timerinterrupt()
 {
-    printf("man, i was interrupted\n");
+    // printf("man, i was interrupted\n");
     A_send(lastSent);
 }
 
@@ -149,6 +165,7 @@ A_timerinterrupt()
 A_init()
 {
     waitingA = 0;
+    seqnumA = 0;
 }
 
 /* Note that with simplex transfer from a-to-B, there is no B_output() */
@@ -156,11 +173,17 @@ A_init()
 /* called from layer 3, when a packet arrives for layer 4 at B*/
 B_input(packet) struct pkt packet;
 {
-    printf("Received from 3A %d wt: %d\n", packet.acknum, waitingB);
+    int checksum = calc_checksum(packet, 1);
+    if (checksum != packet.checksum)
+    {
+        // printf("PACOTE CORROMPIDO %d %d!\n", checksum, packet.checksum);
+        return;
+    }
 
     if (packet.acknum == waitingB)
     {
 
+        printf("Received from 3A %d wt: %d\n", packet.acknum, waitingB);
         struct pkt ack;
         ack.acknum = waitingB;
 
@@ -171,6 +194,7 @@ B_input(packet) struct pkt packet;
         return;
     }
 
+    // In case the packet received was aleready acked.
     struct pkt ack;
     ack.acknum = !waitingB;
 
@@ -284,9 +308,9 @@ init() /* initialize the simulator */
 
     // Defaults
     nsimmax = 10;
-    lossprob = 0.1;
-    corruptprob = 0;
-    lambda = 1000;
+    lossprob = 0.5;
+    corruptprob = 0.5;
+    lambda = 5000;
     TRACE = 0;
 
     // printf("-----  Stop and Wait Network Simulator Version 1.1 -------- \n\n");
