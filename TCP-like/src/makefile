@@ -1,10 +1,10 @@
-all: exe
+all: alternated
 
-exe: main.o
-	gcc -o exe main.o
+alternated: alternated.o
+	gcc -o alternated alternated.o
 
-main.o: main.c
-	gcc -c -Wall main.c
+alternated.o: alternated.c
+	gcc -c -Wall alternated.c
 
 clean:
-	rm -f exe main.o
+	rm -f alternated alternated.o
