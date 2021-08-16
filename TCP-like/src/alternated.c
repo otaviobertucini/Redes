@@ -308,8 +308,8 @@ init() /* initialize the simulator */
 
     // Defaults
     nsimmax = 10;
-    lossprob = 0.5;
-    corruptprob = 0.5;
+    lossprob = 0.8;
+    corruptprob = 0.8;
     lambda = 5000;
     TRACE = 0;
 
