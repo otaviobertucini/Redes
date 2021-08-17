@@ -92,8 +92,8 @@ struct node
 
 struct list
 {
-  struct node* first;
-  struct node* last;
+  struct node *first;
+  struct node *last;
   int size;
 };
 
@@ -113,18 +113,94 @@ struct list queue;
 
 /********* STUDENTS WRITE THE NEXT SEVEN ROUTINES *********/
 
-void list_init(list) struct list* list;
+void list_init(list) struct list *list;
 {
 
   list->first = NULL;
   list->last = NULL;
   list->size = 0;
-
 }
 
-void list_add(node) struct node* node;
+void list_add(struct list *list, struct node *node)
 {
-  
+
+  list->size = list->size + 1;
+  node->next = NULL;
+
+  if (list->first == NULL)
+  {
+    list->first = node;
+    list->last = node;
+    return;
+  }
+
+  list->last->next = node;
+  list->last = node;
+  return;
+}
+
+struct node *list_pop(struct list *list)
+{
+
+  if (list->first == NULL)
+  {
+    printf("Cannot pop empty list!");
+    return NULL;
+  }
+
+  list->size = list->size - 1;
+  struct node *aux = list->first;
+  list->first = aux->next;
+
+  return aux;
+}
+
+int list_size(struct list *list)
+{
+
+  return list->size;
+}
+
+void list_traverse(struct list *list)
+{
+
+  struct node *aux;
+  aux = list->first;
+
+  // if (aux == NULL)
+
+  while (aux != NULL)
+  {
+    printf("cade\n");
+    printf("%d, ", aux->data->seqnum);
+    printf("cabei\n");
+    if (aux->next == NULL)
+    {
+      printf("eh null\n");
+    }
+    aux = aux->next;
+  }
+}
+
+void handle_received_message(struct msg message)
+{
+
+  struct pkt new_packet;
+  memmove(message.data, new_packet.payload, 20);
+  new_packet.seqnum = seqnumA;
+
+  struct node new_node;
+  new_node.next = NULL;
+  new_node.data = &new_packet;
+
+  list_add(&queue, &new_node);
+  if (list_size(&window) < WINDOW_SIZE)
+  {
+    list_add(&window, &new_node);
+  }
+
+  list_traverse(&queue);
+  seqnumA++;
 }
 
 int calc_checksum(packet, a) struct pkt packet;
@@ -160,6 +236,12 @@ A_send(message) struct msg message;
 /* called from layer 5, passed the data to be sent to other side */
 A_output(message) struct msg message;
 {
+
+  printf("----------------------------\n");
+  handle_received_message(message);
+  printf("queue: %d\n", list_size(&queue));
+  printf("window: %d\n", list_size(&window));
+  printf("----------------------------\n");
 }
 
 B_output(message) /* need be completed only for extra credit */
