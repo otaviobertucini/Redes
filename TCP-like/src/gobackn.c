@@ -84,122 +84,33 @@ struct pkt
   char payload[20];
 };
 
-struct node
-{
-  struct node *next;
-  struct pkt *data;
-};
-
-struct list
-{
-  struct node *first;
-  struct node *last;
-  int size;
-};
-
 int in_transit = 0;
 struct msg lastSent;
 
 int waitingA;
 int waitingB;
 
+int notSentYet = 1;
+
 #define WINDOW_SIZE 3
 
 int seqnumA;
 
-struct list window;
-
-struct list queue;
-
 /********* STUDENTS WRITE THE NEXT SEVEN ROUTINES *********/
 
-void list_init(list) struct list *list;
-{
-
-  list->first = NULL;
-  list->last = NULL;
-  list->size = 0;
-}
-
-void list_add(struct list *list, struct node *node)
-{
-
-  list->size = list->size + 1;
-  node->next = NULL;
-
-  if (list->first == NULL)
-  {
-    list->first = node;
-    list->last = node;
-    return;
-  }
-
-  list->last->next = node;
-  list->last = node;
-  return;
-}
-
-struct node *list_pop(struct list *list)
-{
-
-  if (list->first == NULL)
-  {
-    printf("Cannot pop empty list!");
-    return NULL;
-  }
-
-  list->size = list->size - 1;
-  struct node *aux = list->first;
-  list->first = aux->next;
-
-  return aux;
-}
-
-int list_size(struct list *list)
-{
-
-  return list->size;
-}
-
-void list_traverse(struct list *list)
-{
-
-  struct node *aux;
-  aux = list->first;
-
-  // if (aux == NULL)
-
-  while (aux != NULL)
-  {
-    printf("cade\n");
-    printf("%d, ", aux->data->seqnum);
-    printf("cabei\n");
-    if (aux->next == NULL)
-    {
-      printf("eh null\n");
-    }
-    aux = aux->next;
-  }
-}
+struct pkt packet_buffer[100];
 
 void handle_received_message(struct msg message)
 {
 
-  struct pkt new_packet;
-  memmove(message.data, new_packet.payload, 20);
-  new_packet.seqnum = seqnumA;
+  struct pkt *new_packet = &packet_buffer[seqnumA % 100];
+  memmove(message.data, new_packet->payload, 20);
+  new_packet->seqnum = seqnumA;
+  int checksum = calc_checksum(new_packet, waitingA, 0);
+  new_packet->checksum = checksum;
 
-  struct node new_node;
-  new_node.next = NULL;
-  new_node.data = &new_packet;
+  printf("asdsadasd: %d\n", packet_buffer[seqnumA % 100].seqnum);
 
-  list_add(&queue, &new_node);
-  if (list_size(&window) < WINDOW_SIZE)
-  {
-    list_add(&window, &new_node);
-  }
-
-  list_traverse(&queue);
   seqnumA++;
 }
 
@@ -216,32 +127,31 @@ int calc_checksum(packet, a) struct pkt packet;
   return checksum;
 }
 
-A_send(message) struct msg message;
+A_send()
 {
 
-  struct pkt new_packet;
-  memmove(message.data, new_packet.payload, 20);
-  new_packet.acknum = waitingA;
-  new_packet.seqnum = seqnumA;
-  int checksum = calc_checksum(new_packet, waitingA, 0);
-  new_packet.checksum = checksum;
-
-  in_transit = 1;
-  lastSent = message;
+  int count = 0;
+  while (count < WINDOW_SIZE)
+  {
+    struct pkt *togo = &packet_buffer[(count + waitingA) % 100];
+    printf("aloha %d\n", togo->seqnum);
+    count++;
+    tolayer3(A, *togo);
+  }
 
   starttimer(A, 15.0);
-  tolayer3(A, new_packet);
 }
 
 /* called from layer 5, passed the data to be sent to other side */
 A_output(message) struct msg message;
 {
-
-  printf("----------------------------\n");
   handle_received_message(message);
-  printf("queue: %d\n", list_size(&queue));
-  printf("window: %d\n", list_size(&window));
-  printf("----------------------------\n");
+
+  if (notSentYet && seqnumA - 1 < WINDOW_SIZE)
+  {
+    A_send();
+    notSentYet = 0;
+  }
 }
 
 B_output(message) /* need be completed only for extra credit */
@@ -266,16 +176,13 @@ A_input(packet) struct pkt packet;
 A_timerinterrupt()
 {
   // printf("man, i was interrupted\n");
-  A_send(lastSent);
+  // A_send(lastSent);
 }
 
 /* the following routine will be called once (only) before any other */
 /* entity A routines are called. You can use it to do any initialization */
 A_init()
 {
-
-  list_init(&window);
-  list_init(&queue);
 
   waitingA = 0;
   seqnumA = 0;
@@ -286,19 +193,20 @@ A_init()
 /* called from layer 3, when a packet arrives for layer 4 at B*/
 B_input(packet) struct pkt packet;
 {
+  printf("hahahaha\n");
   int checksum = calc_checksum(packet, 1);
   if (checksum != packet.checksum)
   {
-    // printf("PACOTE CORROMPIDO %d %d!\n", checksum, packet.checksum);
+    printf("PACOTE CORROMPIDO %d %d!\n", checksum, packet.checksum);
     return;
   }
 
-  if (packet.acknum == waitingB)
+  if (packet.seqnum == waitingB)
   {
 
-    printf("Received from 3A %d wt: %d\n", packet.acknum, waitingB);
+    printf("Received from 3A %d wt: %d\n", packet.seqnum, waitingB);
     struct pkt ack;
-    ack.acknum = waitingB;
+    ack.seqnum = waitingB;
 
     tolayer3(B, ack);
 
@@ -309,7 +217,7 @@ B_input(packet) struct pkt packet;
 
   // In case the packet received was aleready acked.
   struct pkt ack;
-  ack.acknum = !waitingB;
+  ack.seqnum = !waitingB;
 
   tolayer3(B, ack);
 }

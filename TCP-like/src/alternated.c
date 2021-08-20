@@ -131,6 +131,8 @@ A_output(message) struct msg message;
     if (in_transit)
         return;
 
+    printf("aaa: %c\n", message.data);
+
     printf("Received from 5A %d\n", waitingA);
     A_send(message);
 }
