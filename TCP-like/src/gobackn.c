@@ -1,14 +1,231 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* ******************************************************************
+ ALTERNATING BIT AND GO-BACK-N NETWORK EMULATOR: VERSION 1.1  J.F.Kurose
+   
+   This code should be used for PA2, unidirectional or bidirectional
+   data transfer protocols (from A to  Bidirectional transfer of data
+   is for extra credit and is not required).  Network properties:
+   - one way network delay averages five time units (longer if there
+       are other messages in the channel for GBN), but can be larger
+   - packets can be corrupted (either the header or the data portion)
+       or lost, according to user-defined probabilities
+   - packets will be delivered in the order in which they were sent
+       (although some can be lost).
+**********************************************************************/
+
+#define BIDIRECTIONAL 0 /* change to 1 if you're doing extra credit */
+                        /* and write a routine called B_output */
+
+#define A 0
+#define B 1
+
+#define WINDOW_SIZE 3
+
+/* a "msg" is the data unit passed from layer 5 (teachers code) to layer  */
+/* 4 (students' code).  It contains the data (characters) to be delivered */
+/* to layer 5 via the students transport level protocol entities.         */
+struct msg
+{
+  char data[20];
+};
+
+/* a packet is the data unit passed from layer 4 (students code) to layer */
+/* 3 (teachers code).  Note the pre-defined packet structure, which all   */
+/* students must follow. */
+struct pkt
+{
+  int seqnum;
+  int acknum;
+  int checksum;
+  char payload[20];
+};
+
+void starttimer(int AorB, float increment);
+void stoptimer(int AorB);
+void tolayer3(int AorB, struct pkt packet);
+void tolayer5(int AorB, char datasent[20]);
+void A_resend();
+/********* STUDENTS WRITE THE NEXT SEVEN ROUTINES *********/
+
+#define BUFFSIZE 100
+
+int waitingA;    //Primeiro pacote da janela
+int seqnumA; //Numero de seq do próximo pacote a ser enviado
+int next_packet;                   //Próximo pacote a ser enviado do buffer (Posícão do vetor)
+struct pkt buffer[BUFFSIZE]; //Vetor de pacote a serem enviados
+
+int waitingB;
+
+int calc_checksum(packet) struct pkt packet;
+{
+
+  int checksum = 0;
+  checksum = packet.acknum + packet.seqnum;
+  for (int i = 0; i < 20; i++)
+  {
+    int letter = packet.payload[i];
+    checksum += letter;
+  }
+
+  return checksum;
+}
+
+void A_send()
+{
+  //Envia todos os pacotes
+  while (seqnumA < next_packet && seqnumA < waitingA + WINDOW_SIZE)
+  {
+    struct pkt *packet = &buffer[seqnumA];
+    printf("  A_send: send packet (seq=%d): %s\n", packet->seqnum, packet->payload);
+    tolayer3(A, *packet);
+
+    if (waitingA == seqnumA)
+      starttimer(A, 15.0); //Inicia o timer do primeiro pacote da janela
+
+    seqnumA++;
+  }
+}
+
+// Enfileira o pacote novo que foi recebido
+void handle_received_message(struct msg message)
+{
+  struct pkt *packet = &buffer[next_packet];
+  packet->seqnum = next_packet;
+  memmove(packet->payload, message.data, 20);
+  packet->checksum = calc_checksum(*packet);
+  ++next_packet;
+}
+
+/* called from layer 5, passed the data to be sent to other side */
+void A_output(struct msg message)
+{
+
+  // Verifica se o buffer nao esta cheio
+  if (next_packet - waitingA >= BUFFSIZE)
+  {
+    return;
+  }
+
+  handle_received_message(message);
+
+  if (next_packet - waitingA == WINDOW_SIZE)
+  {
+    A_send();
+  }
+}
+
+/* need be completed only for extra credit */
+void B_output(struct msg message)
+{
+  printf("  B_output: uni-directional. ignore.\n");
+}
+
+/* called from layer 3, when a packet arrives for layer 4 */
+void A_input(struct pkt packet)
+{
+  //Verifica se o pacote não está corrompido
+  if (packet.checksum != calc_checksum(packet))
+  {
+    printf("  A_input: packet corrupted. drop.\n");
+    return;
+  }
+
+  printf("  A_input: got ACK (ack=%d)\n", packet.acknum);
+  waitingA = packet.acknum + 1; //Desloca a janela
+
+  //Caso não haja pacotes na janela para enviar
+  if (waitingA == seqnumA)
+  {
+    stoptimer(A);
+    A_send();
+  }
+  else
+  {
+    stoptimer(A);
+    starttimer(A, 15.0);
+  }
+}
+
+void A_resend()
+{
+  for (int i = waitingA; i < seqnumA; ++i)
+  {
+    struct pkt *packet = &buffer[i];
+    printf("  A_timerinterrupt: resend packet (seq=%d): %s\n", packet->seqnum, packet->payload);
+    tolayer3(A, *packet);
+  }
+  starttimer(A, 15.0);
+}
+
+/* called when A's timer goes off */
+void A_timerinterrupt(void)
+{
+  A_resend();
+}
+
+/* the following routine will be called once (only) before any other */
+/* entity A routines are called. You can use it to do any initialization */
+void A_init(void)
+{
+  waitingA = 0;
+  seqnumA = 0;
+  next_packet = 0;
+}
+
+/* called from layer 3, when a packet arrives for layer 4 at B*/
+void B_input(struct pkt packet)
+{
+  if (packet.checksum != calc_checksum(packet))
+  {
+    return;
+  }
+
+  if (packet.seqnum != waitingB)
+  {
+    struct pkt to_send;
+    to_send.acknum = waitingB - 1;
+    to_send.seqnum = 0;
+    to_send.checksum = calc_checksum(to_send);
+    tolayer3(B, to_send);
+    return;
+  }
+
+  // Deu certo
+  tolayer5(B, packet.payload);
+  printf("Received ok.\n", waitingB);
+  struct pkt to_send;
+  to_send.acknum = waitingB;
+  to_send.seqnum = 0;
+  to_send.checksum = calc_checksum(to_send);
+  tolayer3(B, to_send);
+
+  ++waitingB;
+}
+
+/* called when B's timer goes off */
+void B_timerinterrupt(void)
+{
+  printf("  B_timerinterrupt: B doesn't have a timer. ignore.\n");
+}
+
+/* the following rouytine will be called once (only) before any other */
+/* entity B routines are called. You can use it to do any initialization */
+void B_init(void)
+{
+  waitingB = 0;
+}
 
 /*****************************************************************
 ***************** NETWORK EMULATION CODE STARTS BELOW ***********
 The code below emulates the layer 3 and below network environment:
-  - emulates the tranmission and delivery (possibly with bit-level corruption
-    and packet loss) of packets across the layer 3/4 interface
-  - handles the starting/stopping of a timer, and generates timer
-    interrupts (resulting in calling students timer handler).
-  - generates message to be sent (passed from later 5 to 4)
-
+    - emulates the tranmission and delivery (possibly with bit-level corruption
+        and packet loss) of packets across the layer 3/4 interface
+    - handles the starting/stopping of a timer, and generates timer
+        interrupts (resulting in calling students timer handler).
+    - generates message to be sent (passed from later 5 to 4)
 THERE IS NOT REASON THAT ANY STUDENT SHOULD HAVE TO READ OR UNDERSTAND
 THE CODE BELOW.  YOU SHOLD NOT TOUCH, OR REFERENCE (in your code) ANY
 OF THE DATA STRUCTURES BELOW.  If you're interested in how I designed
@@ -48,214 +265,11 @@ int ntolayer3;     /* number sent into layer 3 */
 int nlost;         /* number lost in media */
 int ncorrupt;      /* number corrupted by media*/
 
-/* ******************************************************************
- ALTERNATING BIT AND GO-BACK-N NETWORK EMULATOR: VERSION 1.1  J.F.Kurose
+void init(int argc, char **argv);
+void generate_next_arrival(void);
+void insertevent(struct event *p);
 
-   This code should be used for PA2, unidirectional or bidirectional
-   data transfer protocols (from A to B. Bidirectional transfer of data
-   is for extra credit and is not required).  Network properties:
-   - one way network delay averages five time units (longer if there
-     are other messages in the channel for GBN), but can be larger
-   - packets can be corrupted (either the header or the data portion)
-     or lost, according to user-defined probabilities
-   - packets will be delivered in the order in which they were sent
-     (although some can be lost).
-**********************************************************************/
-
-#define BIDIRECTIONAL 0 /* change to 1 if you're doing extra credit */
-                        /* and write a routine called B_output */
-
-/* a "msg" is the data unit passed from layer 5 (teachers code) to layer  */
-/* 4 (students' code).  It contains the data (characters) to be delivered */
-/* to layer 5 via the students transport level protocol entities.         */
-struct msg
-{
-  char data[20];
-};
-
-/* a packet is the data unit passed from layer 4 (students code) to layer */
-/* 3 (teachers code).  Note the pre-defined packet structure, which all   */
-/* students must follow. */
-struct pkt
-{
-  int seqnum;
-  int acknum;
-  int checksum;
-  char payload[20];
-};
-
-int in_transit = 0;
-
-int waitingA;
-int waitingB;
-
-int notSentYet = 1;
-
-int window_count;
-
-int lastSent;
-
-#define WINDOW_SIZE 3
-
-int seqnumA;
-
-/********* STUDENTS WRITE THE NEXT SEVEN ROUTINES *********/
-
-struct pkt packet_buffer[100];
-
-// Enfileira a nova mensagem na fila
-void handle_received_message(struct msg message)
-{
-
-  struct pkt *new_packet = &packet_buffer[seqnumA];
-  memmove(message.data, new_packet->payload, 20);
-  new_packet->seqnum = seqnumA;
-  int checksum = calc_checksum(new_packet, waitingA, 0);
-  new_packet->checksum = checksum;
-
-  seqnumA++;
-}
-
-int calc_checksum(packet, a) struct pkt packet;
-{
-
-  int checksum = packet.acknum + packet.seqnum;
-  for (int i = 0; i < 20; i++)
-  {
-    int letter = packet.payload[i];
-    checksum += letter;
-  }
-
-  return checksum;
-}
-
-//Chamado sempre que a janela estiver pronta
-A_send()
-{
-
-  int count = 0;
-  while (count < WINDOW_SIZE)
-  {
-    struct pkt *togo = &packet_buffer[count + waitingA];
-    printf("aqui %d\n", togo->seqnum);
-    count++;
-    lastSent = togo->seqnum;
-    tolayer3(A, *togo);
-  }
-
-  starttimer(A, 15.0);
-}
-
-/* called from layer 5, passed the data to be sent to other side */
-A_output(message) struct msg message;
-{
-  handle_received_message(message);
-
-  // Quando a janela estiver pronta, mande os pacotes na fila
-  if (notSentYet || lastSent - waitingA < WINDOW_SIZE)
-  {
-    A_send();
-    notSentYet = 0;
-  }
-}
-
-B_output(message) /* need be completed only for extra credit */
-    struct msg message;
-{
-}
-
-/* called from layer 3, when a packet arrives for layer 4 */
-A_input(packet) struct pkt packet;
-{
-
-  if (packet.acknum == waitingA)
-  {
-    printf("Received from 3B %d\n", packet.acknum);
-    in_transit = 0;
-    waitingA = waitingA++;
-    window_count++;
-  }
-
-  // Janela vazia, envia nova janela
-  if(waitingA == lastSent + 1)
-  {
-    stoptimer(A);
-    A_send();
-  }
-  else
-  {
-    stoptimer(A);
-    starttimer(A, 15.0);
-  }
-}
-
-/* called when A's timer goes off */
-// Quando o timer estourar, mandar a janela de pacotes de novo.
-A_timerinterrupt()
-{
-  // printf("man, i was interrupted\n");
-  A_send();
-}
-
-/* the following routine will be called once (only) before any other */
-/* entity A routines are called. You can use it to do any initialization */
-A_init()
-{
-
-  waitingA = 0;
-  seqnumA = 0;
-  lastSent = waitingA;
-}
-
-/* Note that with simplex transfer from a-to-B, there is no B_output() */
-
-/* called from layer 3, when a packet arrives for layer 4 at B*/
-B_input(packet) struct pkt packet;
-{
-  int checksum = calc_checksum(packet, 1);
-  if (checksum != packet.checksum)
-  {
-    printf("PACOTE CORROMPIDO %d %d!\n", checksum, packet.checksum);
-    return;
-  }
-
-  if (packet.seqnum == waitingB)
-  {
-
-    printf("Received from 3A %d wt: %d\n", packet.seqnum, waitingB);
-    struct pkt ack;
-    ack.seqnum = waitingB;
-
-    tolayer3(B, ack);
-
-    tolayer5(B, packet.payload);
-
-    waitingB = waitingB++;
-  }
-  else
-  {
-    // Caso o pacote já tenha ACK, mandar o ACK de novo.
-    struct pkt ack;
-    ack.seqnum = packet.seqnum;
-
-    tolayer3(B, ack);
-  }
-  
-}
-
-/* called when B's timer goes off */
-B_timerinterrupt()
-{
-}
-
-/* the following rouytine will be called once (only) before any other */
-/* entity B routines are called. You can use it to do any initialization */
-B_init()
-{
-  waitingB = 0;
-}
-
-main()
+int main(int argc, char **argv)
 {
   struct event *eventptr;
   struct msg msg2give;
@@ -264,7 +278,7 @@ main()
   int i, j;
   char c;
 
-  init();
+  init(argc, argv);
   A_init();
   B_init();
 
@@ -289,27 +303,30 @@ main()
       printf(" entity: %d\n", eventptr->eventity);
     }
     time = eventptr->evtime; /* update time to next event time */
-    if (nsim == nsimmax)
-      break; /* all done with simulation */
     if (eventptr->evtype == FROM_LAYER5)
     {
-      generate_next_arrival(); /* set up future arrival */
-      /* fill in msg to give with string of same letter */
-      j = nsim % 26;
-      for (i = 0; i < 20; i++)
-        msg2give.data[i] = 97 + j;
-      if (TRACE > 2)
+      if (nsim < nsimmax)
       {
-        printf("          MAINLOOP: data given to student: ");
+        if (nsim + 1 < nsimmax)
+          generate_next_arrival(); /* set up future arrival */
+        /* fill in msg to give with string of same letter */
+        j = nsim % 26;
         for (i = 0; i < 20; i++)
-          printf("%c", msg2give.data[i]);
-        printf("\n");
+          msg2give.data[i] = 97 + j;
+        msg2give.data[19] = 0;
+        if (TRACE > 2)
+        {
+          printf("          MAINLOOP: data given to student: ");
+          for (i = 0; i < 20; i++)
+            printf("%c", msg2give.data[i]);
+          printf("\n");
+        }
+        nsim++;
+        if (eventptr->eventity == A)
+          A_output(msg2give);
+        else
+          B_output(msg2give);
       }
-      nsim++;
-      if (eventptr->eventity == A)
-        A_output(msg2give);
-      else
-        B_output(msg2give);
     }
     else if (eventptr->evtype == FROM_LAYER3)
     {
@@ -339,10 +356,12 @@ main()
   }
 
 terminate:
-  printf(" Simulator terminated at time %f\n after sending %d msgs from layer5\n", time, nsim);
+  printf(
+      " Simulator terminated at time %f\n after sending %d msgs from layer5\n",
+      time, nsim);
 }
 
-init() /* initialize the simulator */
+void init(int argc, char **argv) /* initialize the simulator */
 {
   int i;
   float sum, avg;
@@ -350,24 +369,22 @@ init() /* initialize the simulator */
 
   // Defaults
   nsimmax = 10;
-  lossprob = 0.8;
-  corruptprob = 0.8;
+  lossprob = 0.1;
+  corruptprob = 0.1;
   lambda = 5000;
   TRACE = 0;
 
-  window_count = 0;
-
+  // nsimmax = atoi(argv[1]);
+  // lossprob = atof(argv[2]);
+  // corruptprob = atof(argv[3]);
+  // lambda = atof(argv[4]);
+  // TRACE = atoi(argv[5]);
   // printf("-----  Stop and Wait Network Simulator Version 1.1 -------- \n\n");
-  // printf("Enter the number of messages to simulate: ");
-  // scanf("%d", &nsimmax);
-  // printf("Enter  packet loss probability [enter 0.0 for no loss]:");
-  // scanf("%f", &lossprob);
-  // printf("Enter packet corruption probability [0.0 for no corruption]:");
-  // scanf("%f", &corruptprob);
-  // printf("Enter average time between messages from sender's layer5 [ > 0.0]:");
-  // scanf("%f", &lambda);
-  // printf("Enter TRACE:");
-  // scanf("%d", &TRACE);
+  // printf("the number of messages to simulate: %d\n", nsimmax);
+  // printf("packet loss probability: %f\n", lossprob);
+  // printf("packet corruption probability: %f\n", corruptprob);
+  // printf("average time between messages from sender's layer5: %f\n", lambda);
+  // printf("TRACE: %d\n", TRACE);
 
   srand(9999); /* init random number generator */
   sum = 0.0;   /* test random number generator for students */
@@ -379,7 +396,7 @@ init() /* initialize the simulator */
     printf("It is likely that random number generation on your machine\n");
     printf("is different from what this emulator expects.  Please take\n");
     printf("a look at the routine jimsrand() in the emulator code. Sorry. \n");
-    exit(0);
+    exit(1);
   }
 
   ntolayer3 = 0;
@@ -395,11 +412,11 @@ init() /* initialize the simulator */
 /* isolate all random number generation in one location.  We assume that the*/
 /* system-supplied rand() function return an int in therange [0,mmm]        */
 /****************************************************************************/
-float jimsrand()
+float jimsrand(void)
 {
-  double mmm = 2147483647; /* largest int  - MACHINE DEPENDENT!!!!!!!!   */
-  float x;                 /* individual students may need to change mmm */
-  x = rand() / mmm;        /* x should be uniform in [0,1] */
+  double mmm = RAND_MAX;
+  float x;          /* individual students may need to change mmm */
+  x = rand() / mmm; /* x should be uniform in [0,1] */
   return (x);
 }
 
@@ -407,11 +424,10 @@ float jimsrand()
 /*  The next set of routines handle the event list   */
 /*****************************************************/
 
-generate_next_arrival()
+void generate_next_arrival(void)
 {
   double x, log(), ceil();
   struct event *evptr;
-  char *malloc();
   float ttime;
   int tempint;
 
@@ -430,7 +446,7 @@ generate_next_arrival()
   insertevent(evptr);
 }
 
-insertevent(p) struct event *p;
+void insertevent(struct event *p)
 {
   struct event *q, *qold;
 
@@ -473,14 +489,15 @@ insertevent(p) struct event *p;
   }
 }
 
-printevlist()
+void printevlist(void)
 {
   struct event *q;
   int i;
   printf("--------------\nEvent List Follows:\n");
   for (q = evlist; q != NULL; q = q->next)
   {
-    printf("Event time: %f, type: %d entity: %d\n", q->evtime, q->evtype, q->eventity);
+    printf("Event time: %f, type: %d entity: %d\n", q->evtime, q->evtype,
+           q->eventity);
   }
   printf("--------------\n");
 }
@@ -488,7 +505,7 @@ printevlist()
 /********************** Student-callable ROUTINES ***********************/
 
 /* called by students routine to cancel a previously-started timer */
-stoptimer(AorB) int AorB; /* A or B is trying to stop timer */
+void stoptimer(int AorB /* A or B is trying to stop timer */)
 {
   struct event *q, *qold;
 
@@ -519,13 +536,10 @@ stoptimer(AorB) int AorB; /* A or B is trying to stop timer */
   printf("Warning: unable to cancel your timer. It wasn't running.\n");
 }
 
-starttimer(AorB, increment) int AorB; /* A or B is trying to stop timer */
-float increment;
+void starttimer(int AorB /* A or B is trying to stop timer */, float increment)
 {
-
   struct event *q;
   struct event *evptr;
-  char *malloc();
 
   if (TRACE > 2)
     printf("          START TIMER: starting timer at %f\n", time);
@@ -547,13 +561,11 @@ float increment;
 }
 
 /************************** TOLAYER3 ***************/
-tolayer3(AorB, packet) int AorB; /* A or B is trying to stop timer */
-struct pkt packet;
+void tolayer3(int AorB /* A or B is trying to stop timer */, struct pkt packet)
 {
   struct pkt *mypktptr;
   struct event *evptr, *q;
-  char *malloc();
-  float lastime, x, jimsrand();
+  float lastime, x;
   int i;
 
   ntolayer3++;
@@ -590,9 +602,9 @@ struct pkt packet;
   evptr->eventity = (AorB + 1) % 2; /* event occurs at other entity */
   evptr->pktptr = mypktptr;         /* save ptr to my copy of packet */
                                     /* finally, compute the arrival time of packet at the other end.
-   medium can not reorder, so make sure packet arrives between 1 and 10
-   time units after the latest arrival time of packets
-   currently in the medium on their way to the destination */
+                                         medium can not reorder, so make sure packet arrives between 1 and 10
+                                         time units after the latest arrival time of packets
+                                         currently in the medium on their way to the destination */
   lastime = time;
   /* for (q=evlist; q!=NULL && q->next!=NULL; q = q->next) */
   for (q = evlist; q != NULL; q = q->next)
@@ -619,8 +631,7 @@ struct pkt packet;
   insertevent(evptr);
 }
 
-tolayer5(AorB, datasent) int AorB;
-char datasent[20];
+void tolayer5(int AorB, char datasent[20])
 {
   int i;
   if (TRACE > 2)
