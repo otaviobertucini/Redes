@@ -85,12 +85,15 @@ struct pkt
 };
 
 int in_transit = 0;
-struct msg lastSent;
 
 int waitingA;
 int waitingB;
 
 int notSentYet = 1;
+
+int window_count;
+
+int lastSent;
 
 #define WINDOW_SIZE 3
 
@@ -100,16 +103,15 @@ int seqnumA;
 
 struct pkt packet_buffer[100];
 
+// Enfileira a nova mensagem na fila
 void handle_received_message(struct msg message)
 {
 
-  struct pkt *new_packet = &packet_buffer[seqnumA % 100];
+  struct pkt *new_packet = &packet_buffer[seqnumA];
   memmove(message.data, new_packet->payload, 20);
   new_packet->seqnum = seqnumA;
   int checksum = calc_checksum(new_packet, waitingA, 0);
   new_packet->checksum = checksum;
-
-  printf("asdsadasd: %d\n", packet_buffer[seqnumA % 100].seqnum);
 
   seqnumA++;
 }
@@ -127,15 +129,17 @@ int calc_checksum(packet, a) struct pkt packet;
   return checksum;
 }
 
+//Chamado sempre que a janela estiver pronta
 A_send()
 {
 
   int count = 0;
   while (count < WINDOW_SIZE)
   {
-    struct pkt *togo = &packet_buffer[(count + waitingA) % 100];
-    printf("aloha %d\n", togo->seqnum);
+    struct pkt *togo = &packet_buffer[count + waitingA];
+    printf("aqui %d\n", togo->seqnum);
     count++;
+    lastSent = togo->seqnum;
     tolayer3(A, *togo);
   }
 
@@ -147,7 +151,8 @@ A_output(message) struct msg message;
 {
   handle_received_message(message);
 
-  if (notSentYet && seqnumA - 1 < WINDOW_SIZE)
+  // Quando a janela estiver pronta, mande os pacotes na fila
+  if (notSentYet || lastSent - waitingA < WINDOW_SIZE)
   {
     A_send();
     notSentYet = 0;
@@ -167,16 +172,29 @@ A_input(packet) struct pkt packet;
   {
     printf("Received from 3B %d\n", packet.acknum);
     in_transit = 0;
-    waitingA = !waitingA;
+    waitingA = waitingA++;
+    window_count++;
+  }
+
+  // Janela vazia, envia nova janela
+  if(waitingA == lastSent + 1)
+  {
     stoptimer(A);
+    A_send();
+  }
+  else
+  {
+    stoptimer(A);
+    starttimer(A, 15.0);
   }
 }
 
 /* called when A's timer goes off */
+// Quando o timer estourar, mandar a janela de pacotes de novo.
 A_timerinterrupt()
 {
   // printf("man, i was interrupted\n");
-  // A_send(lastSent);
+  A_send();
 }
 
 /* the following routine will be called once (only) before any other */
@@ -186,6 +204,7 @@ A_init()
 
   waitingA = 0;
   seqnumA = 0;
+  lastSent = waitingA;
 }
 
 /* Note that with simplex transfer from a-to-B, there is no B_output() */
@@ -193,7 +212,6 @@ A_init()
 /* called from layer 3, when a packet arrives for layer 4 at B*/
 B_input(packet) struct pkt packet;
 {
-  printf("hahahaha\n");
   int checksum = calc_checksum(packet, 1);
   if (checksum != packet.checksum)
   {
@@ -210,16 +228,19 @@ B_input(packet) struct pkt packet;
 
     tolayer3(B, ack);
 
-    waitingB = !waitingB;
+    tolayer5(B, packet.payload);
 
-    return;
+    waitingB = waitingB++;
   }
+  else
+  {
+    // Caso o pacote já tenha ACK, mandar o ACK de novo.
+    struct pkt ack;
+    ack.seqnum = packet.seqnum;
 
-  // In case the packet received was aleready acked.
-  struct pkt ack;
-  ack.seqnum = !waitingB;
-
-  tolayer3(B, ack);
+    tolayer3(B, ack);
+  }
+  
 }
 
 /* called when B's timer goes off */
@@ -333,6 +354,8 @@ init() /* initialize the simulator */
   corruptprob = 0.8;
   lambda = 5000;
   TRACE = 0;
+
+  window_count = 0;
 
   // printf("-----  Stop and Wait Network Simulator Version 1.1 -------- \n\n");
   // printf("Enter the number of messages to simulate: ");
