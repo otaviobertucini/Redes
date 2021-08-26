@@ -90,7 +90,7 @@ struct msg lastSent;
 int waitingA;
 int waitingB;
 
-int seqnumA;
+// int seqnumA;
 
 /********* STUDENTS WRITE THE NEXT SEVEN ROUTINES *********/
 
@@ -113,7 +113,7 @@ A_send(message) struct msg message;
     struct pkt new_packet;
     memmove(message.data, new_packet.payload, 20);
     new_packet.acknum = waitingA;
-    new_packet.seqnum = seqnumA;
+    // new_packet.seqnum = seqnumA;
     int checksum = calc_checksum(new_packet);
     new_packet.checksum = checksum;
 
@@ -167,7 +167,7 @@ A_timerinterrupt()
 A_init()
 {
     waitingA = 0;
-    seqnumA = 0;
+    // seqnumA = 0;
 }
 
 /* Note that with simplex transfer from a-to-B, there is no B_output() */

@@ -52,10 +52,10 @@ void A_resend();
 
 #define BUFFSIZE 100
 
-int waitingA;    //Primeiro pacote da janela
-int seqnumA; //Numero de seq do próximo pacote a ser enviado
-int next_packet;                   //Próximo pacote a ser enviado do buffer (Posícão do vetor)
-struct pkt buffer[BUFFSIZE]; //Vetor de pacote a serem enviados
+struct pkt buffer[BUFFSIZE]; // Fila de pacotes
+int waitingA;                // Pacote sendo esperado o recebimento
+int seqnumA;                 // Numero do ultimo enviado
+int next_packet;             // Ultima posicao do vetor
 
 int waitingB;
 
@@ -75,15 +75,16 @@ int calc_checksum(packet) struct pkt packet;
 
 void A_send()
 {
-  //Envia todos os pacotes
+  //Envia os pacotes na janela
   while (seqnumA < next_packet && seqnumA < waitingA + WINDOW_SIZE)
   {
     struct pkt *packet = &buffer[seqnumA];
-    printf("  A_send: send packet (seq=%d): %s\n", packet->seqnum, packet->payload);
+    printf("Sent from 3A %d\n", packet->seqnum);
     tolayer3(A, *packet);
 
+    // Quando o pacote for o primeiro da janela, inicia o timer
     if (waitingA == seqnumA)
-      starttimer(A, 15.0); //Inicia o timer do primeiro pacote da janela
+      starttimer(A, 15.0);
 
     seqnumA++;
   }
@@ -111,6 +112,7 @@ void A_output(struct msg message)
 
   handle_received_message(message);
 
+  // Quando a janela inicial tiver o tamanho certo
   if (next_packet - waitingA == WINDOW_SIZE)
   {
     A_send();
@@ -120,7 +122,6 @@ void A_output(struct msg message)
 /* need be completed only for extra credit */
 void B_output(struct msg message)
 {
-  printf("  B_output: uni-directional. ignore.\n");
 }
 
 /* called from layer 3, when a packet arrives for layer 4 */
@@ -129,19 +130,20 @@ void A_input(struct pkt packet)
   //Verifica se o pacote não está corrompido
   if (packet.checksum != calc_checksum(packet))
   {
-    printf("  A_input: packet corrupted. drop.\n");
     return;
   }
 
-  printf("  A_input: got ACK (ack=%d)\n", packet.acknum);
   waitingA = packet.acknum + 1; //Desloca a janela
 
-  //Caso não haja pacotes na janela para enviar
+  //Caso não haja pacotes na janela para enviar (todos foram enviados)
+  // Abre uma nova janela
   if (waitingA == seqnumA)
   {
+    printf("Received from 3B %d\n", packet.acknum);
     stoptimer(A);
     A_send();
   }
+  // Senao apenas zera o timer para o primeiro pacote da janela (pois a janela foi deslocada)
   else
   {
     stoptimer(A);
@@ -149,12 +151,13 @@ void A_input(struct pkt packet)
   }
 }
 
+// Reenvia a janela
 void A_resend()
 {
   for (int i = waitingA; i < seqnumA; ++i)
   {
     struct pkt *packet = &buffer[i];
-    printf("  A_timerinterrupt: resend packet (seq=%d): %s\n", packet->seqnum, packet->payload);
+    printf("Resent from 3A %d\n", packet->seqnum);
     tolayer3(A, *packet);
   }
   starttimer(A, 15.0);
@@ -183,6 +186,7 @@ void B_input(struct pkt packet)
     return;
   }
 
+  // Se for diferente, avisa o sender do ultimo pacote esperado
   if (packet.seqnum != waitingB)
   {
     struct pkt to_send;
@@ -193,9 +197,9 @@ void B_input(struct pkt packet)
     return;
   }
 
-  // Deu certo
+  // Deu certo, enviar ACK e aumentar numero esperado
   tolayer5(B, packet.payload);
-  printf("Received ok.\n", waitingB);
+  printf("Received from 3A %d\n", waitingB);
   struct pkt to_send;
   to_send.acknum = waitingB;
   to_send.seqnum = 0;
@@ -208,7 +212,6 @@ void B_input(struct pkt packet)
 /* called when B's timer goes off */
 void B_timerinterrupt(void)
 {
-  printf("  B_timerinterrupt: B doesn't have a timer. ignore.\n");
 }
 
 /* the following rouytine will be called once (only) before any other */
@@ -251,8 +254,6 @@ struct event *evlist = NULL; /* the event list */
 
 #define OFF 0
 #define ON 1
-#define A 0
-#define B 1
 
 int TRACE = 1;   /* for my debugging */
 int nsim = 0;    /* number of messages from 5 to 4 so far */
@@ -374,17 +375,17 @@ void init(int argc, char **argv) /* initialize the simulator */
   lambda = 5000;
   TRACE = 0;
 
-  // nsimmax = atoi(argv[1]);
-  // lossprob = atof(argv[2]);
-  // corruptprob = atof(argv[3]);
-  // lambda = atof(argv[4]);
-  // TRACE = atoi(argv[5]);
   // printf("-----  Stop and Wait Network Simulator Version 1.1 -------- \n\n");
-  // printf("the number of messages to simulate: %d\n", nsimmax);
-  // printf("packet loss probability: %f\n", lossprob);
-  // printf("packet corruption probability: %f\n", corruptprob);
-  // printf("average time between messages from sender's layer5: %f\n", lambda);
-  // printf("TRACE: %d\n", TRACE);
+  // printf("Enter the number of messages to simulate: ");
+  // scanf("%d", &nsimmax);
+  // printf("Enter  packet loss probability [enter 0.0 for no loss]:");
+  // scanf("%f", &lossprob);
+  // printf("Enter packet corruption probability [0.0 for no corruption]:");
+  // scanf("%f", &corruptprob);
+  // printf("Enter average time between messages from sender's layer5 [ > 0.0]:");
+  // scanf("%f", &lambda);
+  // printf("Enter TRACE:");
+  // scanf("%d", &TRACE);
 
   srand(9999); /* init random number generator */
   sum = 0.0;   /* test random number generator for students */
